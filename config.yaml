@@ -1,0 +1,30 @@
+# Reviewed configuration of anvilkit-agent-inference (DD-09 §4): bounds and
+# fixed profiles only. Precedence: defaults < this file < a validated
+# Apollo snapshot (apollo.mode: snapshot) < the allowlisted environment:
+# ANVILKIT_INFERENCE_LISTEN, ANVILKIT_INFERENCE_MODELS_DIR,
+# ANVILKIT_INFERENCE_APOLLO_SNAPSHOT_FILE (placements). Any other
+# ANVILKIT_INFERENCE_* variable and any unknown key reject the generation.
+# The service holds no secret. DEVELOPMENT_ONLY bounds: CPU, one replica's
+# measurements are ENV-04 inputs, not capacity.
+torch_threads: 4
+max_body_bytes: 4194304
+shutdown_timeout_s: 20
+embedding:
+  profile_id: bge-m3-v1
+  query_max_tokens: 512
+  passage_max_tokens: 2048
+  max_inputs: 64
+  max_request_chars: 262144
+  batch_size: 16
+rerank:
+  profile_id: bge-reranker-v2-m3-v1
+  max_tokens: 1024
+  max_candidates: 64
+  max_request_chars: 262144
+  batch_size: 16
+queue:
+  max_pending_items: 512
+  max_wait_ms: 5
+  request_timeout_ms: 30000
+apollo:
+  mode: disabled

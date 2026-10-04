@@ -1,0 +1,12 @@
+[project]
+name = "anvilkit-agent-inference"
+version = "0.1.0"
+description = "Inference service of the AnvilKit Agent platform (DD-07 §1, delivery.md P15): fixed BGE-M3 dense/sparse embeddings and bge-reranker-v2-m3 scores over contracts/openapi/inference.yaml."
+requires-python = ">=3.12,<3.13"
+# Exact, hash-pinned versions live in requirements.lock (uv pip compile
+# --generate-hashes); the image installs that lock with --require-hashes
+# and the generated contract models from the contracts repository.
+dependencies = ["fastapi==0.141.1", "uvicorn==0.54.0", "FlagEmbedding==1.4.2", "pydantic==2.13.5", "PyYAML==6.0.3", "jsonschema==4.25.1", "prometheus-client==0.23.1"]
+
+[tool.ruff]
+line-length = 140

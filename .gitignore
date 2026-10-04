@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# anvilkit-agent-inference: local tooling state and weights fetched locally with
+# bin/fetch-models.py (models.lock pins them; the image build fetches them).
+/.local/
+/models/
