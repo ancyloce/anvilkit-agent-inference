@@ -1,0 +1,107 @@
+# Chart values of anvilkit-agent-inference. Only what this service needs:
+# its image (the locked weights are inside it), its reviewed configuration
+# file, the listen placement, probes and resources. It has no secret, no
+# database, no Qdrant and no ServiceAccount token. Resource figures are
+# DEVELOPMENT_ONLY (CPU, two fp32 models); the qualified CPU/GPU profile and
+# two-replica residency are ENV-04 measurements.
+image:
+  repository: anvilkit-agent-inference
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+# Two model residencies (platform.md): each replica loads both models.
+replicaCount: 2
+
+# HorizontalPodAutoscaler (autoscaling/v2). Off unless the environment enables
+# it with an explicit maxReplicas: the maximum is bounded by downstream caps
+# and the database connection budget (deploy/gitops/lock.yaml), never a chart
+# default. While enabled the Deployment leaves replicas to the autoscaler.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 0
+  targetCPUUtilizationPercentage: 70
+
+serviceAccount:
+  create: true
+  name: ""
+  automountServiceAccountToken: false
+
+listen:
+  address: 0.0.0.0
+  port: 9108
+
+config:
+  torch_threads: 4
+  max_body_bytes: 4194304
+  shutdown_timeout_s: 20
+  embedding:
+    profile_id: bge-m3-v1
+    query_max_tokens: 512
+    passage_max_tokens: 2048
+    max_inputs: 64
+    max_request_chars: 262144
+    batch_size: 16
+  rerank:
+    profile_id: bge-reranker-v2-m3-v1
+    max_tokens: 1024
+    max_candidates: 64
+    max_request_chars: 262144
+    batch_size: 16
+  queue:
+    max_pending_items: 512
+    max_wait_ms: 5
+    request_timeout_ms: 30000
+  apollo:
+    mode: disabled
+
+service:
+  type: ClusterIP
+  port: 9108
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 6Gi
+  limits:
+    cpu: "4"
+    memory: 8Gi
+
+probes:
+  # Weight load plus the probe computation before the first readiness.
+  startup:
+    periodSeconds: 5
+    failureThreshold: 60
+  readiness:
+    periodSeconds: 5
+    failureThreshold: 3
+  liveness:
+    periodSeconds: 10
+    failureThreshold: 3
+
+terminationGracePeriodSeconds: 40
+
+podDisruptionBudget:
+  minAvailable: 1
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podLabels: {}
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

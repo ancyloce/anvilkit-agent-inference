@@ -1,0 +1,6 @@
+apiVersion: v2
+name: anvilkit-agent-inference
+description: Inference service of the AnvilKit Agent platform (fixed BGE-M3 embeddings and bge-reranker-v2-m3 scores, DD-07 §1).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
