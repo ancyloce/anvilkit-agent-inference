@@ -28,3 +28,10 @@ queue:
   request_timeout_ms: 30000
 apollo:
   mode: disabled
+# The listener transport (P0.6): tls serves HTTPS with the certificate
+# placements ANVILKIT_INFERENCE_TLS_CERT_FILE and ANVILKIT_INFERENCE_TLS_KEY_FILE
+# (reloaded when they change); plaintext (tls.mode development) is
+# DEVELOPMENT_ONLY and needs development.enabled, which only a development
+# configuration file sets.
+tls:
+  mode: tls
