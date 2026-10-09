@@ -1,0 +1,3 @@
+Test-only self-signed certificates for the TLS listener tests (tests/test_inference.py):
+two independent pairs (a, b) for 127.0.0.1/localhost, valid 100 years, so the reload test
+can swap one for the other. They authenticate nothing outside the test process.

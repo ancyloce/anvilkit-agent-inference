@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
+import ssl
+import tempfile
 import threading
 import time
 import unittest
@@ -22,6 +25,12 @@ import uvicorn
 from anvilkit_inference import compute
 from anvilkit_inference.app import Engine, Metrics, create_app
 from anvilkit_inference.config import ConfigError, Inference, load
+from anvilkit_inference.main import CertificateReloader
+
+TLS_FIXTURES = Path(__file__).parent / "fixtures" / "tls"
+# The certificate placements every env-only generation below needs: the
+# listener is HTTPS unless a development configuration file says otherwise.
+TLS_ENV = {"ANVILKIT_INFERENCE_TLS_CERT_FILE": "/run/tls/tls.crt", "ANVILKIT_INFERENCE_TLS_KEY_FILE": "/run/tls/tls.key"}
 
 # The cross-language vectors of the contract's digest rule (Knowledge's
 # TypeScript client test asserts the same values).
@@ -256,14 +265,91 @@ class BatcherTest(unittest.TestCase):
 
 class ConfigTest(unittest.TestCase):
     def test_generation_rules(self) -> None:
-        g = load(None, {"ANVILKIT_INFERENCE_LISTEN": "0.0.0.0:9108"})
+        g = load(None, {"ANVILKIT_INFERENCE_LISTEN": "0.0.0.0:9108", **TLS_ENV})
         self.assertEqual(g.config.listen, "0.0.0.0:9108")
         with self.assertRaises(ConfigError):
-            load(None, {"ANVILKIT_INFERENCE_MODEL_URL": "https://x"})
+            load(None, {"ANVILKIT_INFERENCE_MODEL_URL": "https://x", **TLS_ENV})
         with self.assertRaises(ConfigError):
-            load(None, {"ANVILKIT_INFERENCE_LISTEN": "nowhere"})
-        g2 = load(None, {"ANVILKIT_INFERENCE_LISTEN": "127.0.0.2:9108"})
-        self.assertEqual(g.digest, g2.digest, "placements are not part of the digest")
+            load(None, {"ANVILKIT_INFERENCE_LISTEN": "nowhere", **TLS_ENV})
+        g2 = load(None, {"ANVILKIT_INFERENCE_LISTEN": "127.0.0.2:9108", "ANVILKIT_INFERENCE_TLS_CERT_FILE": "/other/tls.crt",
+                         "ANVILKIT_INFERENCE_TLS_KEY_FILE": "/other/tls.key"})
+        self.assertEqual(g.digest, g2.digest, "placements (the certificate files among them) are not part of the digest")
+
+    def test_transport_rules(self) -> None:
+        """P0.6: HTTPS by default with the certificate placements from the
+        environment only; plaintext only under the DEVELOPMENT_ONLY guard of
+        the reviewed file; an Apollo snapshot sets neither."""
+        with self.assertRaisesRegex(ConfigError, "ANVILKIT_INFERENCE_TLS_CERT_FILE"):
+            load(None, {})
+        with self.assertRaisesRegex(ConfigError, "ANVILKIT_INFERENCE_TLS_CERT_FILE"):
+            load(None, {"ANVILKIT_INFERENCE_TLS_CERT_FILE": "/run/tls/tls.crt"})
+        self.assertEqual(load(None, TLS_ENV).config.tls.mode, "tls")
+        with tempfile.TemporaryDirectory() as d:
+            def file(text: str) -> str:
+                f = Path(d) / f"c{abs(hash(text))}.yaml"
+                f.write_text(text)
+                return str(f)
+            with self.assertRaisesRegex(ConfigError, "development.enabled"):
+                load(file("tls:\n  mode: development\n"), {})
+            dev = load(file("tls:\n  mode: development\ndevelopment:\n  enabled: true\n"), {})
+            self.assertEqual(dev.config.tls.mode, "development")
+            self.assertNotEqual(dev.digest, load(None, TLS_ENV).digest, "the transport mode is part of the digest")
+            with self.assertRaisesRegex(ConfigError, "placement"):
+                load(file("tls:\n  mode: tls\n  cert_file: /etc/x.crt\n"), TLS_ENV)
+            snap = Path(d) / "snapshot.json"
+            snap.write_text(json.dumps({"appId": "anvilkit-agent-inference", "releaseKey": "r1", "expiresAt": "2999-01-01T00:00:00Z",
+                                        "configurations": {"tls.mode": "development"}}))
+            with self.assertRaisesRegex(ConfigError, "reviewed configuration file only"):
+                load(file("apollo:\n  mode: snapshot\n"), {**TLS_ENV, "ANVILKIT_INFERENCE_APOLLO_SNAPSHOT_FILE": str(snap)})
+
+
+class TlsListenerTest(unittest.TestCase):
+    """The HTTPS listener with the fixture pairs: a client verifying the
+    serving certificate connects, a plaintext client does not, and a renewed
+    pair replaces the old one for new handshakes without a restart."""
+
+    def setUp(self) -> None:
+        self.dir = tempfile.mkdtemp()
+        self.cert, self.key = os.path.join(self.dir, "tls.crt"), os.path.join(self.dir, "tls.key")
+        shutil.copy(TLS_FIXTURES / "a.crt", self.cert)
+        shutil.copy(TLS_FIXTURES / "a.key", self.key)
+        self.port = free_port()
+        cfg = Inference.model_validate({})
+        self.server = uvicorn.Server(uvicorn.Config(create_app(cfg, Engine(), Metrics()), host="127.0.0.1", port=self.port, log_level="error",
+                                                    ssl_certfile=self.cert, ssl_keyfile=self.key))
+        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread.start()
+        for _ in range(100):
+            if self.server.started:
+                break
+            time.sleep(0.05)
+        else:
+            raise RuntimeError("server did not start")
+
+    def tearDown(self) -> None:
+        self.server.should_exit = True
+        self.thread.join(timeout=10)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def get(self, trust: str) -> int:
+        ctx = ssl.create_default_context(cafile=str(TLS_FIXTURES / trust))
+        with urllib.request.urlopen(f"https://127.0.0.1:{self.port}/healthz", timeout=10, context=ctx) as r:
+            return r.status
+
+    def test_https_and_reload(self) -> None:
+        self.assertEqual(self.get("a.crt"), 200)
+        with self.assertRaises(OSError):  # the TLS listener drops a plaintext request (RemoteDisconnected or a reset)
+            urllib.request.urlopen(f"http://127.0.0.1:{self.port}/healthz", timeout=10)
+        reloader = CertificateReloader(self.server, self.cert, self.key)
+        self.assertFalse(reloader.check(), "an unchanged pair is not reloaded")
+        shutil.copy(TLS_FIXTURES / "b.key", self.key)
+        self.assertFalse(reloader.check(), "a half-renewed pair (new key, old certificate) keeps the previous one")
+        self.assertEqual(self.get("a.crt"), 200)
+        shutil.copy(TLS_FIXTURES / "b.crt", self.cert)
+        self.assertTrue(reloader.check())
+        self.assertEqual(self.get("b.crt"), 200)
+        with self.assertRaises(urllib.error.URLError):
+            self.get("a.crt")
 
 
 @unittest.skipUnless(os.environ.get("ANVILKIT_INFERENCE_MODELS_DIR"), "ANVILKIT_INFERENCE_MODELS_DIR not set (locked weights)")
