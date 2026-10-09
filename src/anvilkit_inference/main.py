@@ -4,15 +4,20 @@ The first configuration generation is validated (a rejected one starts
 nothing), the HTTP listener binds and answers liveness at once, the locked
 weights load off the event loop and a probe embedding and rerank must
 succeed before readiness is reported. SIGTERM withdraws readiness, drains
-in-flight requests within the configured bound and stops the batchers.
+in-flight requests within the configured bound and stops the batchers. Under
+tls.mode tls the listener serves HTTPS and a watcher reloads the certificate
+and key into the listener's context when cert-manager renews them; new
+handshakes use the new pair, a half-written pair keeps the old one.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import signal
+import ssl
 import sys
 import threading
 from pathlib import Path
@@ -62,6 +67,47 @@ def load_engine(engine: Engine, cfg, metrics: Metrics) -> None:
     log.info("models ready", extra={"model": "bge-m3,bge-reranker-v2-m3", "revision": f"{m3.revision},{rr.revision}"})
 
 
+class CertificateReloader:
+    """Polls the certificate placements and loads a changed pair into the
+    listener's SSL context (the context uvicorn built at start). A pair that
+    does not load (the key written before the certificate) is retried on the
+    next tick; the context keeps serving the previous pair meanwhile."""
+
+    def __init__(self, server: uvicorn.Server, cert_file: str, key_file: str, interval_s: float = 30.0) -> None:
+        self.server, self.cert_file, self.key_file, self.interval_s = server, cert_file, key_file, interval_s
+        self.stop = threading.Event()
+        self.loaded = self.fingerprint()
+        self.reloads = 0
+
+    def fingerprint(self) -> str:
+        h = hashlib.sha256()
+        for f in (self.cert_file, self.key_file):
+            try:
+                h.update(Path(f).read_bytes())
+            except OSError:
+                h.update(b"unreadable")
+        return h.hexdigest()
+
+    def check(self) -> bool:
+        ctx = getattr(self.server.config, "ssl", None)
+        cur = self.fingerprint()
+        if ctx is None or cur == self.loaded:
+            return False
+        try:
+            ctx.load_cert_chain(self.cert_file, self.key_file)
+        except (OSError, ssl.SSLError):
+            log.warning("the renewed certificate pair does not load yet; keeping the previous one")
+            return False
+        self.loaded = cur
+        self.reloads += 1
+        log.info("listener certificate reloaded")
+        return True
+
+    def run(self) -> None:
+        while not self.stop.wait(self.interval_s):
+            self.check()
+
+
 def main() -> int:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
@@ -88,6 +134,7 @@ def main() -> int:
 
     threading.Thread(target=loader, name="model-loader", daemon=True).start()
     host, port = cfg.listen.rsplit(":", 1)
+    tls = {"ssl_certfile": cfg.tls.cert_file, "ssl_keyfile": cfg.tls.key_file} if cfg.tls.mode == "tls" else {}
     server = uvicorn.Server(
         uvicorn.Config(
             app,
@@ -97,8 +144,14 @@ def main() -> int:
             access_log=False,
             timeout_graceful_shutdown=cfg.shutdown_timeout_s,
             limit_concurrency=512,
+            **tls,
         )
     )
+    reloader = None
+    if tls:
+        reloader = CertificateReloader(server, cfg.tls.cert_file, cfg.tls.key_file)
+        threading.Thread(target=reloader.run, name="certificate-reloader", daemon=True).start()
+    log.info("listener transport", extra={"code": cfg.tls.mode})
     original = server.handle_exit
 
     def withdraw(sig: int, frame: object) -> None:
@@ -107,6 +160,8 @@ def main() -> int:
 
     server.handle_exit = withdraw  # type: ignore[method-assign]
     server.run()
+    if reloader is not None:
+        reloader.stop.set()
     for b in (engine.embed, engine.rerank):
         if b is not None:
             b.close()

@@ -4,7 +4,8 @@ defaults < the reviewed config.yaml < a validated, unexpired Apollo snapshot
 (non-secret keys) < the allowlisted ANVILKIT_INFERENCE_* environment, validated
 as a whole; the pattern of packages/profile-schemas/python/config_generation.py.
 The service holds no secret (fixed local weights, no provider key, no
-database): placements come from the environment only. A generation is built
+database) beyond its own TLS key: placements, the certificate files among
+them, come from the environment only. A generation is built
 once at start; a changed input takes effect through a rolling restart, never
 by mutating the running service.
 """
@@ -25,12 +26,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 ENV_PREFIX = "ANVILKIT_INFERENCE_"
 APP_ID = "anvilkit-agent-inference"
-PLACEMENT = re.compile(r"(^|\.)(listen|models_dir|snapshot_file)$")
+PLACEMENT = re.compile(r"(^|\.)(listen|models_dir|snapshot_file|cert_file|key_file)$")
+# Never from an Apollo snapshot: the transport and the DEVELOPMENT_ONLY guard
+# are the reviewed file's (and the certificate placements the environment's).
+FILE_ONLY = ("tls.", "development.")
 
 ENV_OVERRIDES = {
     "ANVILKIT_INFERENCE_LISTEN": "listen",
     "ANVILKIT_INFERENCE_MODELS_DIR": "models_dir",
     "ANVILKIT_INFERENCE_APOLLO_SNAPSHOT_FILE": "apollo.snapshot_file",
+    "ANVILKIT_INFERENCE_TLS_CERT_FILE": "tls.cert_file",
+    "ANVILKIT_INFERENCE_TLS_KEY_FILE": "tls.key_file",
 }
 
 
@@ -69,6 +75,27 @@ class Apollo(BaseModel):
     snapshot_file: str = ""
 
 
+class Tls(BaseModel):
+    """The listener transport (P0.6, F-P0.1-2): tls serves HTTPS with the
+    workload certificate (the cert-manager files of the environment, reloaded
+    when they change); development is plaintext HTTP, admitted only with
+    development.enabled. The listener authenticates no client: who may call is
+    the network policy's (ingress from Knowledge only, P0.4), and the client
+    verifies this server by the cluster CA."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    mode: str = Field(default="tls", pattern="^(development|tls)$")
+    cert_file: str = ""
+    key_file: str = ""
+
+
+class Development(BaseModel):
+    """The top-level DEVELOPMENT_ONLY guard: plaintext needs tls.mode development and this."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    enabled: bool = False
+
+
 class Inference(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     listen: str = Field(default="127.0.0.1:9108", pattern=r"^[^:\s]+:\d{1,5}$")
@@ -80,6 +107,8 @@ class Inference(BaseModel):
     rerank: Rerank = Rerank()
     queue: Queue = Queue()
     apollo: Apollo = Apollo()
+    tls: Tls = Tls()
+    development: Development = Development()
 
     @model_validator(mode="after")
     def cross_fields(self) -> "Inference":
@@ -178,6 +207,8 @@ def load(
         for key, value in snap["configurations"].items():
             if PLACEMENT.search(key):
                 raise ConfigError(f"apollo snapshot: {key} is a placement and never comes from Apollo")
+            if key.startswith(FILE_ONLY):
+                raise ConfigError(f"apollo snapshot: {key} is set by the reviewed configuration file only")
             _set(raw, key, int(value) if isinstance(value, str) and value.isdigit() else value)
         release, expires = snap["releaseKey"], snap["expiresAt"]
     for key, value in env.items():
@@ -186,7 +217,12 @@ def load(
         cfg = Inference.model_validate(raw)
     except ValidationError as err:
         raise ConfigError(f"config: {err}") from None
+    if cfg.tls.mode == "development" and not cfg.development.enabled:
+        raise ConfigError("tls.mode development is DEVELOPMENT_ONLY: plaintext HTTP needs development.enabled: true")
+    if cfg.tls.mode == "tls" and not (cfg.tls.cert_file and cfg.tls.key_file):
+        raise ConfigError("tls.mode tls needs the certificate placements ANVILKIT_INFERENCE_TLS_CERT_FILE and ANVILKIT_INFERENCE_TLS_KEY_FILE")
     non_placement = {k: v for k, v in cfg.model_dump().items() if k not in ("listen", "models_dir")}
+    non_placement["tls"] = {"mode": cfg.tls.mode}
     return Generation(
         number=number,
         config=cfg,
