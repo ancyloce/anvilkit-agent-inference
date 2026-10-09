@@ -1,7 +1,7 @@
 # Independent verification of anvilkit-agent-inference from this repository
 # alone: the image (the generated pydantic models of openapi/inference.yaml
 # from a checkout of the contracts repository at the commit the parent pins:
-# 7d53c8e, tag go/v0.1.8; the hash-locked dependencies and the weights of
+# 1307fb2, tag go/v0.1.9; the hash-locked dependencies and the weights of
 # models.lock fetched and verified at build), the tests inside that image with
 # no network (the compute contract on fake models and, with the image's
 # locked weights, the real BGE-M3 and reranker computations), and the chart.
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ancyloce/anvilkit-agent-contracts
-          ref: 7d53c8e50386b2ae9b640d11e12c2cfc7d912bd8
+          ref: 1307fb26895509b690e315bab3dd180ad3a0c4e6
           path: contracts
       - run: docker build --build-context contracts=contracts -t anvilkit-agent-inference:ci .
       - run: docker run --rm --network none --entrypoint /opt/venv/bin/python anvilkit-agent-inference:ci -m unittest discover -s tests
