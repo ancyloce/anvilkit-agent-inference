@@ -1,7 +1,8 @@
 # Chart values of anvilkit-agent-inference. Only what this service needs:
 # its image (the locked weights are inside it), its reviewed configuration
-# file, the listen placement, probes and resources. It has no secret, no
-# database, no Qdrant and no ServiceAccount token. Resource figures are
+# file, the listen placement, its listener certificate, probes and
+# resources. It has no other secret, no database, no Qdrant and no
+# ServiceAccount token. Resource figures are
 # DEVELOPMENT_ONLY (CPU, two fp32 models); the qualified CPU/GPU profile and
 # two-replica residency are ENV-04 measurements.
 image:
@@ -32,6 +33,33 @@ serviceAccount:
 listen:
   address: 0.0.0.0
   port: 9108
+
+# The listener transport (P0.6, F-P0.1-2). tls serves HTTPS with a
+# cert-manager Certificate (CN and DNS SANs name the Service, which the
+# Knowledge client verifies by server name against the cluster CA; the URI
+# SAN is the workload identity) mounted at /etc/anvilkit/tls and reloaded by
+# the process when renewed; probes use HTTPS. development is plaintext HTTP
+# and renders only with development.enabled. Who may call is the network
+# policy's (P0.4: ingress from Knowledge only); the listener authenticates
+# no client. With certificate.create false, tlsSecret names an existing
+# kubernetes.io/tls Secret.
+tls:
+  mode: tls
+  tlsSecret: ""
+  trustDomain: ""
+  certificate:
+    create: true
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
+    duration: 2160h
+    renewBefore: 720h
+
+# The top-level DEVELOPMENT_ONLY guard: tls.mode development renders only
+# with this.
+development:
+  enabled: false
 
 config:
   torch_threads: 4

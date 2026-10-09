@@ -1,0 +1,31 @@
+{{- include "anvilkit-agent-inference.require" . -}}
+{{- if and (eq .Values.tls.mode "tls") .Values.tls.certificate.create }}
+# The listener certificate (P0.6, F-P0.1-2): CN and DNS SANs name the
+# Service for the Knowledge client's hostname verification; the URI SAN is
+# the workload identity (spiffe://<trustDomain>/ns/<namespace>/sa/<service-account>).
+# cert-manager rotates it; the process reloads the pair for new handshakes.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "anvilkit-agent-inference.fullname" . }}-tls
+  labels:
+    {{- include "anvilkit-agent-inference.labels" . | nindent 4 }}
+spec:
+  commonName: {{ include "anvilkit-agent-inference.name" . }}
+  secretName: {{ include "anvilkit-agent-inference.tlsSecret" . }}
+  duration: {{ .Values.tls.certificate.duration }}
+  renewBefore: {{ .Values.tls.certificate.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages: [digital signature, key encipherment, server auth]
+  dnsNames:
+    - {{ include "anvilkit-agent-inference.fullname" . }}
+    - {{ include "anvilkit-agent-inference.fullname" . }}.{{ .Release.Namespace }}.svc
+    - {{ include "anvilkit-agent-inference.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  uris:
+    - spiffe://{{ default "anvilkit.local" .Values.tls.trustDomain }}/ns/{{ .Release.Namespace }}/sa/{{ include "anvilkit-agent-inference.serviceAccountName" . }}
+  issuerRef:
+    {{- toYaml .Values.tls.certificate.issuerRef | nindent 4 }}
+{{- end }}

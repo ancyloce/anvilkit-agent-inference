@@ -19,7 +19,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
-        checksum/config: {{ toYaml .Values.config | sha256sum }}
+        checksum/config: {{ printf "%s|%s|%v" (toYaml .Values.config) .Values.tls.mode .Values.development.enabled | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -47,6 +47,12 @@ spec:
               value: /etc/anvilkit/anvilkit-agent-inference/config.yaml
             - name: ANVILKIT_INFERENCE_LISTEN
               value: {{ printf "%s:%d" .Values.listen.address (int .Values.listen.port) | quote }}
+            {{- if eq .Values.tls.mode "tls" }}
+            - name: ANVILKIT_INFERENCE_TLS_CERT_FILE
+              value: /etc/anvilkit/tls/tls.crt
+            - name: ANVILKIT_INFERENCE_TLS_KEY_FILE
+              value: /etc/anvilkit/tls/tls.key
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.listen.port }}
@@ -55,18 +61,21 @@ spec:
             httpGet:
               path: /readyz
               port: http
+              scheme: {{ include "anvilkit-agent-inference.probeScheme" . }}
             periodSeconds: {{ .Values.probes.startup.periodSeconds }}
             failureThreshold: {{ .Values.probes.startup.failureThreshold }}
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
+              scheme: {{ include "anvilkit-agent-inference.probeScheme" . }}
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
             failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
+              scheme: {{ include "anvilkit-agent-inference.probeScheme" . }}
             periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
             failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
           resources:
@@ -77,6 +86,11 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            {{- if eq .Values.tls.mode "tls" }}
+            - name: tls
+              mountPath: /etc/anvilkit/tls
+              readOnly: true
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -84,6 +98,12 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
+        {{- if eq .Values.tls.mode "tls" }}
+        - name: tls
+          secret:
+            secretName: {{ include "anvilkit-agent-inference.tlsSecret" . }}
+            defaultMode: 0440
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

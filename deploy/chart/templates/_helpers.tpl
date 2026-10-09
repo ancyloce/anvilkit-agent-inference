@@ -34,3 +34,26 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s:%s" .Values.image.repository (required "image.tag or image.digest is required" .Values.image.tag) -}}
 {{- end -}}
 {{- end }}
+
+{{- define "anvilkit-agent-inference.tlsSecret" -}}
+{{- default (printf "%s-tls" (include "anvilkit-agent-inference.fullname" .)) .Values.tls.tlsSecret -}}
+{{- end }}
+
+{{- define "anvilkit-agent-inference.require" -}}
+{{- if not (has .Values.tls.mode (list "tls" "development")) }}
+{{- fail "tls.mode must be tls or development" }}
+{{- end }}
+{{- if and (eq .Values.tls.mode "development") (not .Values.development.enabled) }}
+{{- fail "tls.mode development is DEVELOPMENT_ONLY: plaintext HTTP renders only with development.enabled: true" }}
+{{- end }}
+{{- if and (eq .Values.tls.mode "tls") .Values.tls.certificate.create (not .Values.tls.certificate.issuerRef.name) }}
+{{- fail "tls.certificate.issuerRef.name is required to issue the listener certificate (or set certificate.create false and tls.tlsSecret)" }}
+{{- end }}
+{{- if and (eq .Values.tls.mode "tls") (not .Values.tls.certificate.create) (not .Values.tls.tlsSecret) }}
+{{- fail "tls.tlsSecret is required when tls.certificate.create is false" }}
+{{- end }}
+{{- end }}
+
+{{- define "anvilkit-agent-inference.probeScheme" -}}
+{{- if eq .Values.tls.mode "tls" }}HTTPS{{ else }}HTTP{{ end -}}
+{{- end }}
