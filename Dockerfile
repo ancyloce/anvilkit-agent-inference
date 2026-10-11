@@ -28,10 +28,12 @@ RUN /opt/venv/bin/python -m compileall -q /opt/anvilkit/src \
 
 FROM ${PYTHON_IMAGE}
 # Debian security fixes the base digest predates (CRITICAL with a fixed
-# version: CVE-2026-31789 OpenSSL, CVE-2026-33845/CVE-2026-42010 GnuTLS),
-# pinned to the fixed versions; the build stage and its weights are unaffected.
+# version: CVE-2026-31789 OpenSSL, CVE-2026-33845/CVE-2026-42010 GnuTLS,
+# CVE-2026-13221/42496/8376 perl-base), pinned to the fixed versions; the
+# build stage and its weights are unaffected.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends --only-upgrade libssl3=3.0.22-1~deb12u1 openssl=3.0.22-1~deb12u1 libgnutls30=3.7.9-2+deb12u7 \
+      perl-base=5.36.0-7+deb12u4 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build /opt/models /opt/models
