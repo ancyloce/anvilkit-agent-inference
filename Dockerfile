@@ -29,11 +29,14 @@ RUN /opt/venv/bin/python -m compileall -q /opt/anvilkit/src \
 FROM ${PYTHON_IMAGE}
 # Debian security fixes the base digest predates (CRITICAL with a fixed
 # version: CVE-2026-31789 OpenSSL, CVE-2026-33845/CVE-2026-42010 GnuTLS,
-# CVE-2026-13221/42496/8376 perl-base), pinned to the fixed versions; the
-# build stage and its weights are unaffected.
+# CVE-2026-13221/42496/8376 perl-base; HIGH CVE-2026-86145/89157/89161/103111
+# libpcre2, CVE-2026-4878 libcap2, CVE-2026-40355/40356 Kerberos), pinned to
+# the fixed versions; the build stage and its weights are unaffected.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends --only-upgrade libssl3=3.0.22-1~deb12u1 openssl=3.0.22-1~deb12u1 libgnutls30=3.7.9-2+deb12u7 \
-      perl-base=5.36.0-7+deb12u4 \
+      perl-base=5.36.0-7+deb12u4 libpcre2-8-0=10.42-1+deb12u2 libcap2=1:2.66-4+deb12u3+b1 \
+      libgssapi-krb5-2=1.20.1-2+deb12u5 libk5crypto3=1.20.1-2+deb12u5 libkrb5-3=1.20.1-2+deb12u5 \
+      libkrb5support0=1.20.1-2+deb12u5 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build /opt/models /opt/models
