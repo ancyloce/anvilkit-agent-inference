@@ -14,7 +14,7 @@ import hashlib
 import threading
 import time
 from concurrent.futures import Future
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Callable, Protocol
@@ -70,7 +70,6 @@ class Model(Protocol):
 class _Job:
     items: list[Any]
     future: Future
-    queued_at: float = field(default_factory=time.monotonic)
 
 
 class Batcher:
