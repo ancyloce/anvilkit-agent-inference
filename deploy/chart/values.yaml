@@ -17,8 +17,9 @@ replicaCount: 2
 
 # HorizontalPodAutoscaler (autoscaling/v2). Off unless the environment enables
 # it with an explicit maxReplicas: the maximum is bounded by downstream caps
-# and the database connection budget (deploy/gitops/lock.yaml), never a chart
-# default. While enabled the Deployment leaves replicas to the autoscaler.
+# and ENV-04's CPU/GPU profile (deploy/gitops/lock.yaml; Inference holds no
+# database connection), never a chart default. While enabled the Deployment
+# leaves replicas to the autoscaler.
 autoscaling:
   enabled: false
   minReplicas: 2
