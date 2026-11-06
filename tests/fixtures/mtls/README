@@ -1,0 +1,17 @@
+Test-only certificates for the mTLS listener tests (tests/test_mtls.py, RB-A17).
+ECDSA P-256, valid 100 years; they authenticate nothing outside the test process.
+Trust domain anvilkit.test; the CA keys are discarded.
+
+ca.crt          the test CA (client and server certificates below are issued by it)
+other-ca.crt    a second, unrelated CA
+server          the listener's pair: DNS localhost, IP 127.0.0.1, URI spiffe://anvilkit.test/ns/anvilkit-apps/sa/anvilkit-agent-inference
+knowledge       client: URI spiffe://anvilkit.test/ns/anvilkit-apps/sa/anvilkit-agent-knowledge (the allowed peer)
+mcp             client: URI spiffe://anvilkit.test/ns/anvilkit-apps/sa/anvilkit-agent-mcp (a valid but unlisted peer)
+no-uri          client: no URI SAN (DNS knowledge.test only)
+two-uris        client: two URI SANs (Knowledge and MCP; an X.509-SVID carries exactly one)
+foreign         client: Knowledge's URI, issued by other-ca
+
+Regenerate with the generation script recorded beside the evidence of RB-A17
+(outputs/rb-wave4/gen-mtls-fixtures.sh in the parent checkout): openssl ecparam
+and req for the CAs, x509 -req with basicConstraints, keyUsage, extendedKeyUsage
+(serverAuth or clientAuth), subject and authority key identifiers and the SANs.
