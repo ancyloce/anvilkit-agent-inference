@@ -26,7 +26,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 ENV_PREFIX = "ANVILKIT_INFERENCE_"
 APP_ID = "anvilkit-agent-inference"
-PLACEMENT = re.compile(r"(^|\.)(listen|models_dir|snapshot_file|cert_file|key_file)$")
+PLACEMENT = re.compile(r"(^|\.)(listen|models_dir|snapshot_file|cert_file|key_file|ca_file)$")
+# An X.509-SVID's identity (SPIFFE): spiffe://<trust domain>/<path>.
+SPIFFE_ID = re.compile(r"^spiffe://[a-z0-9][a-z0-9.-]*(/[^/\s]+)+$")
 # Never from an Apollo snapshot: the transport and the DEVELOPMENT_ONLY guard
 # are the reviewed file's (and the certificate placements the environment's).
 FILE_ONLY = ("tls.", "development.")
@@ -37,6 +39,8 @@ ENV_OVERRIDES = {
     "ANVILKIT_INFERENCE_APOLLO_SNAPSHOT_FILE": "apollo.snapshot_file",
     "ANVILKIT_INFERENCE_TLS_CERT_FILE": "tls.cert_file",
     "ANVILKIT_INFERENCE_TLS_KEY_FILE": "tls.key_file",
+    "ANVILKIT_INFERENCE_TLS_CA_FILE": "tls.ca_file",
+    "ANVILKIT_INFERENCE_PROBE_LISTEN": "probe.listen",
 }
 
 
@@ -78,15 +82,28 @@ class Apollo(BaseModel):
 class Tls(BaseModel):
     """The listener transport (P0.6, F-P0.1-2): tls serves HTTPS with the
     workload certificate (the cert-manager files of the environment, reloaded
-    when they change); development is plaintext HTTP, admitted only with
-    development.enabled. The listener authenticates no client: who may call is
-    the network policy's (ingress from Knowledge only, P0.4), and the client
-    verifies this server by the cluster CA."""
+    when they change) and authenticates no client: who may call is then the
+    network policy's (ingress from Knowledge only, P0.4). mtls (RB-A17) also
+    requires a client certificate issued by ca_file and admits only the SPIFFE
+    IDs of allowed_peers (Knowledge's workload identity); kubelet probes, which
+    present no certificate, go to probe.listen. development is plaintext HTTP,
+    admitted only with development.enabled. The client verifies this server by
+    the cluster CA."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
-    mode: str = Field(default="tls", pattern="^(development|tls)$")
+    mode: str = Field(default="tls", pattern="^(development|tls|mtls)$")
     cert_file: str = ""
     key_file: str = ""
+    ca_file: str = ""
+    allowed_peers: list[str] = []
+
+
+class Probe(BaseModel):
+    """The plaintext probe listener (RB-A17): /healthz and /readyz only, for the
+    kubelet; empty serves the probes on the main listener."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    listen: str = Field(default="", pattern=r"^$|^[^:\s]+:\d{1,5}$")
 
 
 class Development(BaseModel):
@@ -108,6 +125,7 @@ class Inference(BaseModel):
     queue: Queue = Queue()
     apollo: Apollo = Apollo()
     tls: Tls = Tls()
+    probe: Probe = Probe()
     development: Development = Development()
 
     @model_validator(mode="after")
@@ -219,10 +237,26 @@ def load(
         raise ConfigError(f"config: {err}") from None
     if cfg.tls.mode == "development" and not cfg.development.enabled:
         raise ConfigError("tls.mode development is DEVELOPMENT_ONLY: plaintext HTTP needs development.enabled: true")
-    if cfg.tls.mode == "tls" and not (cfg.tls.cert_file and cfg.tls.key_file):
-        raise ConfigError("tls.mode tls needs the certificate placements ANVILKIT_INFERENCE_TLS_CERT_FILE and ANVILKIT_INFERENCE_TLS_KEY_FILE")
-    non_placement = {k: v for k, v in cfg.model_dump().items() if k not in ("listen", "models_dir")}
+    if cfg.tls.mode in ("tls", "mtls") and not (cfg.tls.cert_file and cfg.tls.key_file):
+        raise ConfigError(f"tls.mode {cfg.tls.mode} needs the certificate placements ANVILKIT_INFERENCE_TLS_CERT_FILE and ANVILKIT_INFERENCE_TLS_KEY_FILE")
+    if cfg.tls.mode == "mtls":
+        if not cfg.tls.ca_file:
+            raise ConfigError("tls.mode mtls needs the client CA placement ANVILKIT_INFERENCE_TLS_CA_FILE")
+        if not cfg.tls.allowed_peers:
+            raise ConfigError("tls.mode mtls needs tls.allowed_peers: the SPIFFE IDs that may call (Knowledge's workload identity)")
+        bad = [p for p in cfg.tls.allowed_peers if not SPIFFE_ID.match(p)]
+        if bad:
+            raise ConfigError(f"tls.allowed_peers: {len(bad)} entr{'y is' if len(bad) == 1 else 'ies are'} not a SPIFFE ID (spiffe://<trust domain>/<path>)")
+        if not cfg.probe.listen:
+            raise ConfigError("tls.mode mtls needs the probe placement ANVILKIT_INFERENCE_PROBE_LISTEN: kubelet probes present no client certificate")
+    elif cfg.tls.allowed_peers:
+        raise ConfigError("tls.allowed_peers authenticates callers only under tls.mode mtls")
+    if cfg.probe.listen and cfg.probe.listen == cfg.listen:
+        raise ConfigError("probe.listen must differ from listen")
+    non_placement = {k: v for k, v in cfg.model_dump().items() if k not in ("listen", "models_dir", "probe")}
     non_placement["tls"] = {"mode": cfg.tls.mode}
+    if cfg.tls.mode == "mtls":
+        non_placement["tls"]["allowed_peers"] = sorted(cfg.tls.allowed_peers)
     return Generation(
         number=number,
         config=cfg,
