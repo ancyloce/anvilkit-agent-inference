@@ -8,13 +8,21 @@ The Inference service of the AnvilKit Agent platform (architecture V4.0, [DD-07 
 - Bodies are read within `max_body_bytes`, parsed strictly (duplicate keys, NaN and trailing data refused) and validated by the generated pydantic models in strict JSON mode (unknown fields refused). Size bounds (inputs, candidates, characters) answer 413 `CAPACITY_EXHAUSTED`; a full compute queue answers 503 `CAPACITY_EXHAUSTED` (retryable); another profile answers 400 `PROFILE_UNQUALIFIED`; every error is the contract's envelope.
 - `GET /healthz` (liveness), `GET /readyz` (200 only after both models loaded and a probe embedding and rerank succeeded), `GET /metrics` (requests by route/code, items and micro-batch sizes/time by model, readiness; no text).
 
+## Transport
+
+- `tls.mode tls` (the default) serves HTTPS with the workload certificate and authenticates no client: the NetworkPolicy decides who may call (Knowledge only).
+- `tls.mode mtls` (RB-A17) also requires a client certificate issued by `ANVILKIT_INFERENCE_TLS_CA_FILE`. It admits only the SPIFFE IDs of `tls.allowed_peers`, which comes from the reviewed file only, never from Apollo; the ID is the certificate's single `spiffe://` URI SAN. A peer outside the list is closed before any of its bytes reach the application.
+- The kubelet's probes, which present no certificate, then go to the plaintext `probe.listen` (`ANVILKIT_INFERENCE_PROBE_LISTEN`; `/healthz` and `/readyz` only), which `mtls` requires. The chart sets it with `listen.probePort`.
+- A renewed client CA is added to the listener's trust without a restart; a removed CA stays trusted until the next restart.
+- `tls.mode development` is plaintext and needs `development.enabled`.
+
 ## Weights and dependencies
 
 `models.lock` pins `BAAI/bge-m3` at `5617a9f61b028005a4858fdac845db406aefb181` (MIT) and `BAAI/bge-reranker-v2-m3` at `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e` (Apache-2.0) with the SHA-256 of every file loaded; the image build fetches exactly these (`bin/fetch-models.py`) and fails on any difference, and the service runs with `HF_HUB_OFFLINE=1`. `requirements.lock` is the hash-pinned dependency set (`uv pip compile --generate-hashes`, CPU torch 2.14.0, FlagEmbedding 1.4.2, FastAPI 0.141.1, transformers 5.17.0), installed with `--require-hashes`; the generated contract models come from the contracts repository (named build context).
 
 ## Configuration
 
-`config.yaml` (bounds and fixed profiles) < a validated Apollo snapshot (`apollo.mode: snapshot`) < the allowlisted environment `ANVILKIT_INFERENCE_{LISTEN,MODELS_DIR,APOLLO_SNAPSHOT_FILE,CONFIG}`; any other variable or unknown key rejects the generation (the pattern of the parent's `packages/profile-schemas/python/config_generation.py`). One generation is built at start; a changed input takes effect through a rolling restart.
+`config.yaml` (bounds and fixed profiles) < a validated Apollo snapshot (`apollo.mode: snapshot`) < the allowlisted environment `ANVILKIT_INFERENCE_{LISTEN,MODELS_DIR,APOLLO_SNAPSHOT_FILE,CONFIG,TLS_CERT_FILE,TLS_KEY_FILE,TLS_CA_FILE,PROBE_LISTEN}`; any other variable or unknown key rejects the generation (the pattern of the parent's `packages/profile-schemas/python/config_generation.py`). One generation is built at start; a changed input takes effect through a rolling restart.
 
 ## Checks
 
@@ -22,7 +30,7 @@ The Inference service of the AnvilKit Agent platform (architecture V4.0, [DD-07 
 
 ## Limits
 
-CPU only; no GPU profile, throughput or two-replica residency measurement (ENV-04). The micro-batcher runs one model thread per model per replica; measured batch sizes and latency are development observations, not capacity. Workload mTLS is ENV-03 (the listener is plaintext like the other new services).
+CPU only; no GPU profile, throughput or two-replica residency measurement (ENV-04). The micro-batcher runs one model thread per model per replica; measured batch sizes and latency are development observations, not capacity. The placements still run `tls.mode tls`. Switching qualification to `mtls` and narrowing the NetworkPolicy's node rule to the probe port is RB-A17's second phase, after a release carries this image. The production CA and trust domain are ENV-03.
 
 ## Repository
 
