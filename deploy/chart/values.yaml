@@ -7,6 +7,9 @@
 # two-replica residency are ENV-04 measurements.
 image:
   repository: anvilkit-agent-inference
+  # digest pins the exact image (repository@sha256:...) and is required
+  # outside development (RB-S10); only development.enabled renders the tag,
+  # which is then required.
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent

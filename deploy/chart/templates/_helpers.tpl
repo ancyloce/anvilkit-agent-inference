@@ -30,8 +30,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "anvilkit-agent-inference.image" -}}
 {{- if .Values.image.digest -}}
 {{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
-{{- else -}}
+{{- else if .Values.development.enabled -}}
 {{- printf "%s:%s" .Values.image.repository (required "image.tag or image.digest is required" .Values.image.tag) -}}
+{{- else -}}
+{{- fail "image.digest is required outside development: a tag is mutable and only a digest pins the image (RB-S10); the tag renders only with development.enabled: true" -}}
 {{- end -}}
 {{- end }}
 
