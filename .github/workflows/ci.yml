@@ -40,3 +40,15 @@ jobs:
           echo "$out" | grep -q "image.digest is required outside development" || { echo "$out"; exit 1; }
           # The development guard keeps the tag (DEVELOPMENT_ONLY).
           helm template anvilkit-agent-inference deploy/chart --set tls.certificate.issuerRef.name=ci-issuer --set image.tag=ci --set development.enabled=true > /dev/null
+      - name: Render tls.mode mtls with its probe listener, refuse it incomplete (RB-A17)
+        run: |
+          sets=(--set tls.certificate.issuerRef.name=ci-issuer --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000001 --set tls.mode=mtls)
+          peer='tls.allowedPeers[0]=spiffe://ci.example/ns/anvilkit-apps/sa/anvilkit-agent-knowledge'
+          out=$(helm template anvilkit-agent-inference deploy/chart "${sets[@]}" --set "$peer" --set listen.probePort=9129)
+          for want in "name: ANVILKIT_INFERENCE_TLS_CA_FILE" "name: ANVILKIT_INFERENCE_PROBE_LISTEN" "containerPort: 9129" "port: probe" "allowed_peers:"; do
+            echo "$out" | grep -q "$want" || { echo "missing: $want"; exit 1; }
+          done
+          for args in "--set $peer" "--set listen.probePort=9129"; do
+            # shellcheck disable=SC2086
+            if helm template anvilkit-agent-inference deploy/chart "${sets[@]}" $args > /dev/null 2>&1; then echo "rendered mtls without peers or probe port ($args)"; exit 1; fi
+          done
