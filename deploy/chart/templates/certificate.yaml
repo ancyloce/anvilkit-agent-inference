@@ -1,5 +1,5 @@
 {{- include "anvilkit-agent-inference.require" . -}}
-{{- if and (eq .Values.tls.mode "tls") .Values.tls.certificate.create }}
+{{- if and (has .Values.tls.mode (list "tls" "mtls")) .Values.tls.certificate.create }}
 # The listener certificate (P0.6, F-P0.1-2): CN and DNS SANs name the
 # Service for the Knowledge client's hostname verification; the URI SAN is
 # the workload identity (spiffe://<trustDomain>/ns/<namespace>/sa/<service-account>).

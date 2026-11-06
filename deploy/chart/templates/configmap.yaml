@@ -7,4 +7,6 @@ metadata:
     {{- include "anvilkit-agent-inference.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    {{- toYaml (merge (dict "tls" (dict "mode" .Values.tls.mode) "development" (dict "enabled" .Values.development.enabled)) (deepCopy .Values.config)) | nindent 4 }}
+    {{- $tls := dict "mode" .Values.tls.mode }}
+    {{- if eq .Values.tls.mode "mtls" }}{{- $_ := set $tls "allowed_peers" .Values.tls.allowedPeers }}{{- end }}
+    {{- toYaml (merge (dict "tls" $tls "development" (dict "enabled" .Values.development.enabled)) (deepCopy .Values.config)) | nindent 4 }}

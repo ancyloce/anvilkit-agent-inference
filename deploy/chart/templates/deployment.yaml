@@ -47,34 +47,49 @@ spec:
               value: /etc/anvilkit/anvilkit-agent-inference/config.yaml
             - name: ANVILKIT_INFERENCE_LISTEN
               value: {{ printf "%s:%d" .Values.listen.address (int .Values.listen.port) | quote }}
-            {{- if eq .Values.tls.mode "tls" }}
+            {{- if has .Values.tls.mode (list "tls" "mtls") }}
             - name: ANVILKIT_INFERENCE_TLS_CERT_FILE
               value: /etc/anvilkit/tls/tls.crt
             - name: ANVILKIT_INFERENCE_TLS_KEY_FILE
               value: /etc/anvilkit/tls/tls.key
             {{- end }}
+            {{- if eq .Values.tls.mode "mtls" }}
+            # RB-A17: the client CA, the issuer of the workload certificates (the
+            # Secret's ca.crt).
+            - name: ANVILKIT_INFERENCE_TLS_CA_FILE
+              value: /etc/anvilkit/tls/ca.crt
+            {{- end }}
+            {{- if int .Values.listen.probePort }}
+            - name: ANVILKIT_INFERENCE_PROBE_LISTEN
+              value: {{ printf "%s:%d" .Values.listen.address (int .Values.listen.probePort) | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.listen.port }}
               protocol: TCP
+            {{- if int .Values.listen.probePort }}
+            - name: probe
+              containerPort: {{ .Values.listen.probePort }}
+              protocol: TCP
+            {{- end }}
           startupProbe:
             httpGet:
               path: /readyz
-              port: http
+              port: {{ include "anvilkit-agent-inference.probePort" . }}
               scheme: {{ include "anvilkit-agent-inference.probeScheme" . }}
             periodSeconds: {{ .Values.probes.startup.periodSeconds }}
             failureThreshold: {{ .Values.probes.startup.failureThreshold }}
           readinessProbe:
             httpGet:
               path: /readyz
-              port: http
+              port: {{ include "anvilkit-agent-inference.probePort" . }}
               scheme: {{ include "anvilkit-agent-inference.probeScheme" . }}
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
             failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
           livenessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: {{ include "anvilkit-agent-inference.probePort" . }}
               scheme: {{ include "anvilkit-agent-inference.probeScheme" . }}
             periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
             failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
@@ -86,7 +101,7 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
-            {{- if eq .Values.tls.mode "tls" }}
+            {{- if has .Values.tls.mode (list "tls" "mtls") }}
             - name: tls
               mountPath: /etc/anvilkit/tls
               readOnly: true
@@ -98,7 +113,7 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
-        {{- if eq .Values.tls.mode "tls" }}
+        {{- if has .Values.tls.mode (list "tls" "mtls") }}
         - name: tls
           secret:
             secretName: {{ include "anvilkit-agent-inference.tlsSecret" . }}

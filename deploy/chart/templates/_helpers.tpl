@@ -42,20 +42,38 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{- define "anvilkit-agent-inference.require" -}}
-{{- if not (has .Values.tls.mode (list "tls" "development")) }}
-{{- fail "tls.mode must be tls or development" }}
+{{- if not (has .Values.tls.mode (list "tls" "mtls" "development")) }}
+{{- fail "tls.mode must be tls, mtls or development" }}
 {{- end }}
 {{- if and (eq .Values.tls.mode "development") (not .Values.development.enabled) }}
 {{- fail "tls.mode development is DEVELOPMENT_ONLY: plaintext HTTP renders only with development.enabled: true" }}
 {{- end }}
-{{- if and (eq .Values.tls.mode "tls") .Values.tls.certificate.create (not .Values.tls.certificate.issuerRef.name) }}
+{{- if and (has .Values.tls.mode (list "tls" "mtls")) .Values.tls.certificate.create (not .Values.tls.certificate.issuerRef.name) }}
 {{- fail "tls.certificate.issuerRef.name is required to issue the listener certificate (or set certificate.create false and tls.tlsSecret)" }}
 {{- end }}
-{{- if and (eq .Values.tls.mode "tls") (not .Values.tls.certificate.create) (not .Values.tls.tlsSecret) }}
+{{- if and (has .Values.tls.mode (list "tls" "mtls")) (not .Values.tls.certificate.create) (not .Values.tls.tlsSecret) }}
 {{- fail "tls.tlsSecret is required when tls.certificate.create is false" }}
+{{- end }}
+{{- if and (eq .Values.tls.mode "mtls") (not .Values.tls.allowedPeers) }}
+{{- fail "tls.allowedPeers is required under tls.mode mtls: the SPIFFE IDs that may call (Knowledge's workload identity)" }}
+{{- end }}
+{{- if and (eq .Values.tls.mode "mtls") (not (int .Values.listen.probePort)) }}
+{{- fail "listen.probePort is required under tls.mode mtls: kubelet probes present no client certificate" }}
+{{- end }}
+{{- if and (ne .Values.tls.mode "mtls") .Values.tls.allowedPeers }}
+{{- fail "tls.allowedPeers authenticates callers only under tls.mode mtls" }}
+{{- end }}
+{{- if and (int .Values.listen.probePort) (eq (int .Values.listen.probePort) (int .Values.listen.port)) }}
+{{- fail "listen.probePort must differ from listen.port" }}
 {{- end }}
 {{- end }}
 
+{{/* The probes reach the plaintext probe listener when listen.probePort is
+set (required under mtls), otherwise the main listener. */}}
 {{- define "anvilkit-agent-inference.probeScheme" -}}
-{{- if eq .Values.tls.mode "tls" }}HTTPS{{ else }}HTTP{{ end -}}
+{{- if int .Values.listen.probePort }}HTTP{{ else if eq .Values.tls.mode "tls" }}HTTPS{{ else }}HTTP{{ end -}}
+{{- end }}
+
+{{- define "anvilkit-agent-inference.probePort" -}}
+{{- if int .Values.listen.probePort }}probe{{ else }}http{{ end -}}
 {{- end }}
