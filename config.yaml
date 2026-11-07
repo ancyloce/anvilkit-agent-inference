@@ -36,3 +36,10 @@ apollo:
 # configuration file sets.
 tls:
   mode: tls
+# DEVELOPMENT_ONLY (RB-A17): tls authenticates no caller, so it loads only
+# with this guard; it downgrades nothing by itself. This image default serves
+# the development foundation and its integration scenario; a placement
+# outside development renders its own file (the chart: tls.mode mtls with
+# tls.allowed_peers and a probe listener).
+development:
+  enabled: true
