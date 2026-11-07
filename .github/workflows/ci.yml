@@ -32,11 +32,12 @@ jobs:
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         with:
           version: "v3.19.0"
-      - run: helm lint deploy/chart --set tls.certificate.issuerRef.name=ci-issuer --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000001
-      - run: helm template anvilkit-agent-inference deploy/chart --set tls.certificate.issuerRef.name=ci-issuer --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000001 > /dev/null
+      # Outside development the listener is tls.mode mtls (RB-A17), so the renders name its peers and probe port.
+      - run: helm lint deploy/chart --set tls.certificate.issuerRef.name=ci-issuer --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000001 --set tls.mode=mtls --set 'tls.allowedPeers[0]=spiffe://ci.example/ns/anvilkit-apps/sa/anvilkit-agent-knowledge' --set listen.probePort=9129
+      - run: helm template anvilkit-agent-inference deploy/chart --set tls.certificate.issuerRef.name=ci-issuer --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000001 --set tls.mode=mtls --set 'tls.allowedPeers[0]=spiffe://ci.example/ns/anvilkit-apps/sa/anvilkit-agent-knowledge' --set listen.probePort=9129 > /dev/null
       - name: Refuse a tag-only image outside development (RB-S10)
         run: |
-          if out=$(helm template anvilkit-agent-inference deploy/chart --set tls.certificate.issuerRef.name=ci-issuer --set image.tag=ci 2>&1); then echo "rendered a tag-only image outside development"; exit 1; fi
+          if out=$(helm template anvilkit-agent-inference deploy/chart --set tls.certificate.issuerRef.name=ci-issuer --set image.tag=ci --set tls.mode=mtls --set 'tls.allowedPeers[0]=spiffe://ci.example/ns/anvilkit-apps/sa/anvilkit-agent-knowledge' --set listen.probePort=9129 2>&1); then echo "rendered a tag-only image outside development"; exit 1; fi
           echo "$out" | grep -q "image.digest is required outside development" || { echo "$out"; exit 1; }
           # The development guard keeps the tag (DEVELOPMENT_ONLY).
           helm template anvilkit-agent-inference deploy/chart --set tls.certificate.issuerRef.name=ci-issuer --set image.tag=ci --set development.enabled=true > /dev/null
@@ -52,3 +53,11 @@ jobs:
             # shellcheck disable=SC2086
             if helm template anvilkit-agent-inference deploy/chart "${sets[@]}" $args > /dev/null 2>&1; then echo "rendered mtls without peers or probe port ($args)"; exit 1; fi
           done
+      - name: Refuse tls.mode tls outside development (RB-A17)
+        run: |
+          sets=(--set tls.certificate.issuerRef.name=ci-issuer --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000001)
+          if out=$(helm template anvilkit-agent-inference deploy/chart "${sets[@]}" 2>&1); then echo "rendered tls.mode tls outside development"; exit 1; fi
+          echo "$out" | grep -q "tls.mode tls authenticates no caller" || { echo "$out"; exit 1; }
+          # The development guard keeps tls (DEVELOPMENT_ONLY).
+          helm lint deploy/chart "${sets[@]}" --set development.enabled=true
+          helm template anvilkit-agent-inference deploy/chart "${sets[@]}" --set development.enabled=true > /dev/null
