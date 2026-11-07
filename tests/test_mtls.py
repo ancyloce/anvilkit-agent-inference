@@ -65,6 +65,8 @@ class Files:
 
 
 MTLS_FILE = f"tls:\n  mode: mtls\n  allowed_peers:\n    - {KNOWLEDGE}\n"
+# The DEVELOPMENT_ONLY guard that tls.mode tls needs (RB-A17 Phase B).
+DEVELOPMENT = "development:\n  enabled: true\n"
 
 
 class MtlsConfigTest(unittest.TestCase):
@@ -104,7 +106,7 @@ class MtlsConfigTest(unittest.TestCase):
         two = load(self.file(f"tls:\n  mode: mtls\n  allowed_peers: [{KNOWLEDGE}, {MCP}]\n"), env())
         self.assertNotEqual(g.digest, two.digest, "a widened allowlist is a new generation")
         plain_tls = {k: v for k, v in env().items() if k in ("ANVILKIT_INFERENCE_TLS_CERT_FILE", "ANVILKIT_INFERENCE_TLS_KEY_FILE")}
-        self.assertNotEqual(g.digest, load(None, plain_tls).digest, "the transport mode is part of the digest")
+        self.assertNotEqual(g.digest, load(self.file(DEVELOPMENT), plain_tls).digest, "the transport mode is part of the digest")
 
     def test_an_apollo_snapshot_never_sets_the_allowlist(self) -> None:
         snap = Path(self.file.dir) / "snapshot.json"
@@ -123,9 +125,14 @@ class MtlsConfigTest(unittest.TestCase):
 
     def test_tls_and_development_keep_their_rules(self) -> None:
         plain_tls = {k: v for k, v in env().items() if k in ("ANVILKIT_INFERENCE_TLS_CERT_FILE", "ANVILKIT_INFERENCE_TLS_KEY_FILE")}
-        self.assertEqual(load(None, plain_tls).config.tls.mode, "tls")
+        # RB-A17 Phase B: tls authenticates no caller, so only the
+        # DEVELOPMENT_ONLY guard admits it; outside development it is mtls.
+        with self.assertRaisesRegex(ConfigError, "tls.mode tls authenticates no caller"):
+            load(None, plain_tls)
+        self.assertEqual(load(self.file(DEVELOPMENT), plain_tls).config.tls.mode, "tls")
         self.assertEqual(
-            load(None, {**plain_tls, "ANVILKIT_INFERENCE_PROBE_LISTEN": "127.0.0.1:9128"}).config.probe.listen, "127.0.0.1:9128"
+            load(self.file(DEVELOPMENT), {**plain_tls, "ANVILKIT_INFERENCE_PROBE_LISTEN": "127.0.0.1:9128"}).config.probe.listen,
+            "127.0.0.1:9128",
         )
         dev = load(self.file("tls:\n  mode: development\ndevelopment:\n  enabled: true\n"), {})
         self.assertEqual(dev.config.probe.listen, "")

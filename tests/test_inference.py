@@ -31,6 +31,9 @@ TLS_FIXTURES = Path(__file__).parent / "fixtures" / "tls"
 # The certificate placements every env-only generation below needs: the
 # listener is HTTPS unless a development configuration file says otherwise.
 TLS_ENV = {"ANVILKIT_INFERENCE_TLS_CERT_FILE": "/run/tls/tls.crt", "ANVILKIT_INFERENCE_TLS_KEY_FILE": "/run/tls/tls.key"}
+# The image's reviewed default (DEVELOPMENT_ONLY: tls.mode tls under the
+# guard, RB-A17); in the image it is /opt/anvilkit/config.yaml beside the tests.
+IMAGE_CONFIG = str(Path(__file__).parents[1] / "config.yaml")
 
 # The cross-language vectors of the contract's digest rule (Knowledge's
 # TypeScript client test asserts the same values).
@@ -265,14 +268,14 @@ class BatcherTest(unittest.TestCase):
 
 class ConfigTest(unittest.TestCase):
     def test_generation_rules(self) -> None:
-        g = load(None, {"ANVILKIT_INFERENCE_LISTEN": "0.0.0.0:9108", **TLS_ENV})
+        g = load(IMAGE_CONFIG, {"ANVILKIT_INFERENCE_LISTEN": "0.0.0.0:9108", **TLS_ENV})
         self.assertEqual(g.config.listen, "0.0.0.0:9108")
         with self.assertRaises(ConfigError):
-            load(None, {"ANVILKIT_INFERENCE_MODEL_URL": "https://x", **TLS_ENV})
+            load(IMAGE_CONFIG, {"ANVILKIT_INFERENCE_MODEL_URL": "https://x", **TLS_ENV})
         with self.assertRaises(ConfigError):
-            load(None, {"ANVILKIT_INFERENCE_LISTEN": "nowhere", **TLS_ENV})
-        g2 = load(None, {"ANVILKIT_INFERENCE_LISTEN": "127.0.0.2:9108", "ANVILKIT_INFERENCE_TLS_CERT_FILE": "/other/tls.crt",
-                         "ANVILKIT_INFERENCE_TLS_KEY_FILE": "/other/tls.key"})
+            load(IMAGE_CONFIG, {"ANVILKIT_INFERENCE_LISTEN": "nowhere", **TLS_ENV})
+        g2 = load(IMAGE_CONFIG, {"ANVILKIT_INFERENCE_LISTEN": "127.0.0.2:9108", "ANVILKIT_INFERENCE_TLS_CERT_FILE": "/other/tls.crt",
+                                 "ANVILKIT_INFERENCE_TLS_KEY_FILE": "/other/tls.key"})
         self.assertEqual(g.digest, g2.digest, "placements (the certificate files among them) are not part of the digest")
 
     def test_transport_rules(self) -> None:
@@ -283,17 +286,25 @@ class ConfigTest(unittest.TestCase):
             load(None, {})
         with self.assertRaisesRegex(ConfigError, "ANVILKIT_INFERENCE_TLS_CERT_FILE"):
             load(None, {"ANVILKIT_INFERENCE_TLS_CERT_FILE": "/run/tls/tls.crt"})
-        self.assertEqual(load(None, TLS_ENV).config.tls.mode, "tls")
+        # RB-A17: tls authenticates no caller, so it loads only under the
+        # DEVELOPMENT_ONLY guard; the image's default file sets it.
+        with self.assertRaisesRegex(ConfigError, "tls.mode tls authenticates no caller and is DEVELOPMENT_ONLY"):
+            load(None, TLS_ENV)
+        image = load(IMAGE_CONFIG, TLS_ENV).config
+        self.assertEqual((image.tls.mode, image.development.enabled), ("tls", True))
         with tempfile.TemporaryDirectory() as d:
             def file(text: str) -> str:
                 f = Path(d) / f"c{abs(hash(text))}.yaml"
                 f.write_text(text)
                 return str(f)
+            with self.assertRaisesRegex(ConfigError, "tls.mode tls authenticates no caller"):
+                load(file("tls:\n  mode: tls\ndevelopment:\n  enabled: false\n"), TLS_ENV)
             with self.assertRaisesRegex(ConfigError, "development.enabled"):
                 load(file("tls:\n  mode: development\n"), {})
             dev = load(file("tls:\n  mode: development\ndevelopment:\n  enabled: true\n"), {})
             self.assertEqual(dev.config.tls.mode, "development")
-            self.assertNotEqual(dev.digest, load(None, TLS_ENV).digest, "the transport mode is part of the digest")
+            dev_tls = load(file("development:\n  enabled: true\n"), TLS_ENV)
+            self.assertNotEqual(dev.digest, dev_tls.digest, "the transport mode is part of the digest")
             with self.assertRaisesRegex(ConfigError, "placement"):
                 load(file("tls:\n  mode: tls\n  cert_file: /etc/x.crt\n"), TLS_ENV)
             snap = Path(d) / "snapshot.json"
