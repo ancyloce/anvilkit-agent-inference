@@ -10,7 +10,7 @@ The Inference service of the AnvilKit Agent platform (architecture V4.0, [DD-07 
 
 ## Transport
 
-- `tls.mode tls` (the default) serves HTTPS with the workload certificate and authenticates no client: the NetworkPolicy decides who may call (Knowledge only).
+- `tls.mode tls` (the default) serves HTTPS with the workload certificate and authenticates no client: the NetworkPolicy decides who may call (Knowledge only). It is DEVELOPMENT_ONLY (RB-A17): the loader and the chart accept it only with `development.enabled`, which the image's default `config.yaml` sets for the development foundation. Outside development the mode is `mtls`, and the chart's default fails until the environment sets it.
 - `tls.mode mtls` (RB-A17) also requires a client certificate issued by `ANVILKIT_INFERENCE_TLS_CA_FILE`. It admits only the SPIFFE IDs of `tls.allowed_peers`, which comes from the reviewed file only, never from Apollo; the ID is the certificate's single `spiffe://` URI SAN. A peer outside the list is closed before any of its bytes reach the application.
 - The kubelet's probes, which present no certificate, then go to the plaintext `probe.listen` (`ANVILKIT_INFERENCE_PROBE_LISTEN`; `/healthz` and `/readyz` only), which `mtls` requires. The chart sets it with `listen.probePort`.
 - A renewed client CA is added to the listener's trust without a restart; a removed CA stays trusted until the next restart.
@@ -26,11 +26,11 @@ The Inference service of the AnvilKit Agent platform (architecture V4.0, [DD-07 
 
 ## Checks
 
-`python -m unittest discover -s tests` (with `PYTHONPATH=src:<contracts checkout>/python` and the locked environment, or inside the image: `docker run --rm --network none --entrypoint /opt/venv/bin/python anvilkit-agent-inference:dev -m unittest discover -s tests`); `ANVILKIT_INFERENCE_MODELS_DIR` names the locked weights for the real-model test. `docker build --build-context contracts=<contracts checkout> -t anvilkit-agent-inference:dev .` (`../../../contracts` in the parent checkout); `helm lint deploy/chart`.
+`python -m unittest discover -s tests` (with `PYTHONPATH=src:<contracts checkout>/python` and the locked environment, or inside the image: `docker run --rm --network none --entrypoint /opt/venv/bin/python anvilkit-agent-inference:dev -m unittest discover -s tests`); `ANVILKIT_INFERENCE_MODELS_DIR` names the locked weights for the real-model test. `docker build --build-context contracts=<contracts checkout> -t anvilkit-agent-inference:dev .` (`../../../contracts` in the parent checkout); `helm lint deploy/chart` with the settings of the CI `chart` job (outside development the chart needs `tls.mode mtls`, `tls.allowedPeers` and `listen.probePort`; `--set development.enabled=true` renders the `tls` default).
 
 ## Limits
 
-CPU only; no GPU profile, throughput or two-replica residency measurement (ENV-04). The micro-batcher runs one model thread per model per replica; measured batch sizes and latency are development observations, not capacity. The placements still run `tls.mode tls`. Switching qualification to `mtls` and narrowing the NetworkPolicy's node rule to the probe port is RB-A17's second phase, after a release carries this image. The production CA and trust domain are ENV-03.
+CPU only; no GPU profile, throughput or two-replica residency measurement (ENV-04). The micro-batcher runs one model thread per model per replica; measured batch sizes and latency are development observations, not capacity. The development placements (Compose, the development foundation) run `tls.mode tls` under the development guard. The parent's qualification values run `mtls`, admitting Knowledge's SPIFFE ID, and its NetworkPolicy admits the nodes to the probe port only (RB-A17 Phase B). The production CA and trust domain are ENV-03.
 
 ## Repository
 
