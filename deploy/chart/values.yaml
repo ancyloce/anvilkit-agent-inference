@@ -49,7 +49,9 @@ listen:
 # the process when renewed; probes use HTTPS. development is plaintext HTTP
 # and renders only with development.enabled. Under tls, who may call is the
 # network policy's (P0.4: ingress from Knowledge only); the listener
-# authenticates no client. mtls (RB-A17) also requires a client certificate
+# authenticates no client, so tls also renders only with development.enabled
+# (DEVELOPMENT_ONLY): outside development the mode is mtls, and this default
+# fails until the environment sets it (RB-A17). mtls also requires a client certificate
 # from the Secret's ca.crt (the issuer of the workload certificates) and
 # admits only the SPIFFE IDs of allowedPeers; it needs listen.probePort.
 # With certificate.create false, tlsSecret names an existing kubernetes.io/tls

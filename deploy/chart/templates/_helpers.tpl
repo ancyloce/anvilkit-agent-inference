@@ -48,6 +48,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and (eq .Values.tls.mode "development") (not .Values.development.enabled) }}
 {{- fail "tls.mode development is DEVELOPMENT_ONLY: plaintext HTTP renders only with development.enabled: true" }}
 {{- end }}
+{{- if and (eq .Values.tls.mode "tls") (not .Values.development.enabled) }}
+{{- fail "tls.mode tls authenticates no caller and is DEVELOPMENT_ONLY: it renders only with development.enabled: true; outside development use tls.mode mtls with tls.allowedPeers and listen.probePort (RB-A17)" }}
+{{- end }}
 {{- if and (has .Values.tls.mode (list "tls" "mtls")) .Values.tls.certificate.create (not .Values.tls.certificate.issuerRef.name) }}
 {{- fail "tls.certificate.issuerRef.name is required to issue the listener certificate (or set certificate.create false and tls.tlsSecret)" }}
 {{- end }}
