@@ -83,7 +83,8 @@ class Tls(BaseModel):
     """The listener transport (P0.6, F-P0.1-2): tls serves HTTPS with the
     workload certificate (the cert-manager files of the environment, reloaded
     when they change) and authenticates no client: who may call is then the
-    network policy's (ingress from Knowledge only, P0.4). mtls (RB-A17) also
+    network policy's (ingress from Knowledge only, P0.4), so tls loads only
+    with development.enabled (DEVELOPMENT_ONLY, RB-A17). mtls (RB-A17) also
     requires a client certificate issued by ca_file and admits only the SPIFFE
     IDs of allowed_peers (Knowledge's workload identity); kubelet probes, which
     present no certificate, go to probe.listen. development is plaintext HTTP,
@@ -253,6 +254,11 @@ def load(
         raise ConfigError("tls.allowed_peers authenticates callers only under tls.mode mtls")
     if cfg.probe.listen and cfg.probe.listen == cfg.listen:
         raise ConfigError("probe.listen must differ from listen")
+    if cfg.tls.mode == "tls" and not cfg.development.enabled:
+        raise ConfigError(
+            "tls.mode tls authenticates no caller and is DEVELOPMENT_ONLY: it needs development.enabled: true;"
+            " outside development tls.mode mtls admits only tls.allowed_peers (RB-A17)"
+        )
     non_placement = {k: v for k, v in cfg.model_dump().items() if k not in ("listen", "models_dir", "probe")}
     non_placement["tls"] = {"mode": cfg.tls.mode}
     if cfg.tls.mode == "mtls":
