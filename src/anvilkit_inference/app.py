@@ -77,6 +77,12 @@ class Metrics:
             "anvilkit_inference_batch_seconds", "Model time per executed micro-batch.", ["model"], registry=self.registry
         )
         self.ready = Gauge("anvilkit_inference_ready", "1 after the weights loaded and the probe passed.", registry=self.registry)
+        # DD-09 §6 (RB-A25), named as Knowledge and MCP name it: the active
+        # configuration generation. A generation is built once at start, so a
+        # rejected candidate never starts the process.
+        self.generation = Gauge(
+            "anvilkit_inference_config_generation", "Number of the active configuration generation.", registry=self.registry
+        )
 
     def observe(self, model: str, items: int, seconds: float) -> None:
         self.items.labels(model).inc(items)

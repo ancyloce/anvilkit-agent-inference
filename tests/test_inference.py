@@ -278,6 +278,13 @@ class ConfigTest(unittest.TestCase):
                                  "ANVILKIT_INFERENCE_TLS_KEY_FILE": "/other/tls.key"})
         self.assertEqual(g.digest, g2.digest, "placements (the certificate files among them) are not part of the digest")
 
+    def test_generation_metric(self) -> None:
+        """RB-A25: the active configuration generation is exported under the
+        name Knowledge and MCP use."""
+        m = Metrics()
+        m.generation.set(load(IMAGE_CONFIG, {"ANVILKIT_INFERENCE_LISTEN": "0.0.0.0:9108", **TLS_ENV}).number)
+        self.assertEqual(m.registry.get_sample_value("anvilkit_inference_config_generation"), 1.0)
+
     def test_transport_rules(self) -> None:
         """P0.6: HTTPS by default with the certificate placements from the
         environment only; plaintext only under the DEVELOPMENT_ONLY guard of

@@ -24,6 +24,7 @@ import signal
 import ssl
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -38,7 +39,7 @@ log = logging.getLogger("anvilkit.inference")
 
 
 class JsonFormatter(logging.Formatter):
-    FIELDS = ("requestId", "route", "code", "seconds", "generation", "digest", "model", "revision")
+    FIELDS = ("requestId", "route", "code", "seconds", "generation", "digest", "model", "revision", "drainSeconds", "forced")
 
     def format(self, record: logging.LogRecord) -> str:
         out = {"level": record.levelname.lower(), "msg": record.getMessage(), "service": "anvilkit-agent-inference"}
@@ -214,6 +215,7 @@ def main() -> int:
     log.info("configuration generation active", extra={"generation": gen.number, "digest": gen.digest})
     engine = Engine()
     metrics = Metrics()
+    metrics.generation.set(gen.number)
     app = create_app(cfg, engine, metrics)
     failed = threading.Event()
 
@@ -235,12 +237,22 @@ def main() -> int:
     log.info("listener transport", extra={"code": cfg.tls.mode})
     original = server.handle_exit
 
+    stopping: list[float] = []
+
     def withdraw(sig: int, frame: object) -> None:
         engine.ready = False
+        if not stopping:
+            stopping.append(time.monotonic())
         original(sig, frame)
 
     server.handle_exit = withdraw  # type: ignore[method-assign]
     server.run()
+    # RB-A25: the drain time and whether uvicorn's graceful bound ended it
+    # (it cancels the requests still running). Logged, not exported: /metrics
+    # is served only on the business listener this drain has just closed.
+    if stopping:
+        drain = time.monotonic() - stopping[0]
+        log.info("inference drained", extra={"drainSeconds": round(drain, 3), "forced": drain >= cfg.shutdown_timeout_s})
     if reloader is not None:
         reloader.stop.set()
     if probes is not None:
